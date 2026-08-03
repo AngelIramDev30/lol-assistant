@@ -1,6 +1,10 @@
 from fastapi import FastAPI, HTTPException
 from requests import RequestException
-
+from app.engine.draft_engine import DraftEngine
+from app.engine.plugins.blind_pick.blind_pick_plugin import BlindPickPlugin
+from app.engine.plugins.matchup.matchup_plugin import MatchupPlugin
+from app.engine.plugins.meta.meta_plugin import MetaPlugin
+from app.engine.scoring_engine import ScoringEngine
 from app.engine.champion_select_engine import ChampionSelectEngine
 from app.services.data_dragon_service import DataDragonService
 
@@ -17,7 +21,15 @@ league_client = LeagueClient()
 
 data_dragon = DataDragonService(locale="es_MX")
 champion_select_engine = ChampionSelectEngine(data_dragon)
+scoring_engine = ScoringEngine(
+    plugins=[
+        MetaPlugin(),
+        MatchupPlugin(),
+        BlindPickPlugin(),
+    ]
+)
 
+draft_engine = DraftEngine(scoring_engine)
 LEAGUE_PATH = r"D:\Riot Games\League of Legends"
 
 
@@ -126,8 +138,51 @@ def champion_select() -> dict:
             detail="No se pudo leer Champion Select.",
         ) from error
 
+@app.get("/league/draft-recommendations")
+def draft_recommendations() -> dict:
+    connect_league_client()
+
+    try:
+        session = league_client.get_champion_select_session()
+
+        if session is None:
+            return {
+                "active": False,
+                "message": "No estás en selección de campeón.",
+            }
+
+        champion_select_data = champion_select_engine.analyze(session)
+
+        all_champions = data_dragon.get_all_champions()
+
+        draft_result = draft_engine.recommend(
+            champion_select=champion_select_data,
+            candidates=all_champions,
+            limit=5,
+        )
+
+        return {
+            "active": True,
+            "patch": champion_select_data.get("patch"),
+            "draft": draft_result,
+        }
+
+    except RequestException as error:
+        raise HTTPException(
+            status_code=502,
+            detail="No se pudo leer la selección de campeón.",
+        ) from error
+
     except RuntimeError as error:
         raise HTTPException(
             status_code=500,
             detail=str(error),
         ) from error
+    
+    except RuntimeError as error:
+        raise HTTPException(
+            status_code=500,
+            detail=str(error),
+        ) from error
+
+    
