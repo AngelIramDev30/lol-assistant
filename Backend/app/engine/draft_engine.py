@@ -1,0 +1,58 @@
+﻿from typing import Any
+
+from app.engine.plugins.base import RecommendationContext
+from app.engine.scoring_engine import ScoringEngine
+
+
+class DraftEngine:
+    def __init__(self, scoring_engine: ScoringEngine) -> None:
+        self.scoring_engine = scoring_engine
+
+    def recommend(
+        self,
+        champion_select: dict[str, Any],
+        candidates: list[dict[str, Any]],
+        owned_champion_ids: set[int] | None = None,
+        limit: int = 5,
+    ) -> dict[str, Any]:
+        enemy_ids = [
+            int(player["championId"])
+            for player in champion_select.get("enemies", [])
+            if player.get("championId")
+        ]
+
+        ally_ids = [
+            int(player["championId"])
+            for player in champion_select.get("allies", [])
+            if player.get("championId")
+        ]
+
+        banned_ids = [
+            int(ban["championId"])
+            for ban in champion_select.get("bans", [])
+            if ban.get("championId")
+            and ban.get("completed", False)
+        ]
+
+        context = RecommendationContext(
+            role=champion_select.get("assignedPosition"),
+            pick_order=champion_select.get("pickOrder"),
+            ally_champion_ids=ally_ids,
+            enemy_champion_ids=enemy_ids,
+            banned_champion_ids=banned_ids,
+            owned_champion_ids=owned_champion_ids or set(),
+        )
+
+        recommendations = self.scoring_engine.rank_champions(
+            champions=candidates,
+            context=context,
+            limit=limit,
+        )
+
+        return {
+            "role": context.role,
+            "pickOrder": context.pick_order,
+            "knownEnemies": enemy_ids,
+            "bannedChampionIds": banned_ids,
+            "recommendations": recommendations,
+        }

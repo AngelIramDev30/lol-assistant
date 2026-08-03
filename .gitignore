@@ -1,0 +1,43 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Entorno virtual
+.venv/
+venv/
+
+# Variables y secretos
+.env
+.env.*
+!.env.example
+
+# Base de datos local
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs y cachés
+*.log
+.cache/
+Backend/cache/
+
+# VS Code / IDE
+.vscode/
+.idea/
+
+# React / Node
+node_modules/
+dist/
+build/
+coverage/
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# macOS
+.DS_Store
