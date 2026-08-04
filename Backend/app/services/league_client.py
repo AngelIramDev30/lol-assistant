@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+﻿from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -6,8 +6,9 @@ import requests
 import urllib3
 
 
-# El cliente local usa un certificado HTTPS autofirmado.
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+urllib3.disable_warnings(
+    urllib3.exceptions.InsecureRequestWarning
+)
 
 
 @dataclass
@@ -31,11 +32,12 @@ class LeagueClient:
             return False
 
         try:
-            content = lockfile_path.read_text(encoding="utf-8").strip()
+            content = lockfile_path.read_text(
+                encoding="utf-8"
+            ).strip()
 
-            process, pid, port, password, protocol = content.split(
-                ":",
-                maxsplit=4,
+            process, pid, port, password, protocol = (
+                content.split(":", maxsplit=4)
             )
 
             self.lockfile = LockfileData(
@@ -71,7 +73,8 @@ class LeagueClient:
     ) -> Any:
         if self.lockfile is None:
             raise RuntimeError(
-                "League Client no está conectado. Ejecuta find_lockfile primero."
+                "League Client no está conectado. "
+                "Ejecuta find_lockfile primero."
             )
 
         if not endpoint.startswith("/"):
@@ -95,7 +98,15 @@ class LeagueClient:
         if not response.content:
             return None
 
-        return response.json()
+        content_type = response.headers.get(
+            "content-type",
+            "",
+        ).lower()
+
+        if "application/json" in content_type:
+            return response.json()
+
+        return response.text
 
     def get_current_summoner(self) -> dict[str, Any]:
         data = self.request(
@@ -104,7 +115,9 @@ class LeagueClient:
         )
 
         if not isinstance(data, dict):
-            raise RuntimeError("El cliente devolvió un perfil inválido.")
+            raise RuntimeError(
+                "El cliente devolvió un perfil inválido."
+            )
 
         return data
 
@@ -115,25 +128,107 @@ class LeagueClient:
         )
 
         if not isinstance(data, str):
-            raise RuntimeError("El cliente devolvió una fase inválida.")
+            raise RuntimeError(
+                "El cliente devolvió una fase inválida."
+            )
 
         return data
 
-    def get_champion_select_session(self) -> dict[str, Any] | None:
+    def get_champion_select_session(
+        self,
+    ) -> dict[str, Any] | None:
         try:
             data = self.request(
                 method="GET",
                 endpoint="/lol-champ-select/v1/session",
             )
 
-            if isinstance(data, dict):
-                return data
-
-            return None
-
         except requests.HTTPError as error:
-            # 404 significa que no estás actualmente en Champion Select.
-            if error.response is not None and error.response.status_code == 404:
+            if (
+                error.response is not None
+                and error.response.status_code == 404
+            ):
                 return None
 
             raise
+
+        if not isinstance(data, dict):
+            return None
+
+        return data
+
+    def get_owned_champions(
+        self,
+    ) -> list[dict[str, Any]]:
+        try:
+            data = self.request(
+                method="GET",
+                endpoint=(
+                    "/lol-champions/v1/"
+                    "owned-champions-minimal"
+                ),
+            )
+
+        except requests.HTTPError as error:
+            response = error.response
+
+            if (
+                response is None
+                or response.status_code != 404
+            ):
+                raise
+
+            profile = self.get_current_summoner()
+            summoner_id = profile.get("summonerId")
+
+            if summoner_id is None:
+                raise RuntimeError(
+                    "No se pudo obtener el summonerId."
+                ) from error
+
+            data = self.request(
+                method="GET",
+                endpoint=(
+                    "/lol-champions/v1/inventories/"
+                    f"{summoner_id}/champions-minimal"
+                ),
+            )
+
+        if not isinstance(data, list):
+            raise RuntimeError(
+                "El cliente devolvió una lista "
+                "de campeones inválida."
+            )
+
+        owned: list[dict[str, Any]] = []
+
+        for champion in data:
+            if not isinstance(champion, dict):
+                continue
+
+            ownership = champion.get("ownership", {})
+
+            if not isinstance(ownership, dict):
+                continue
+
+            if ownership.get("owned", False):
+                owned.append(champion)
+
+        return owned
+
+    def get_owned_champion_ids(self) -> set[int]:
+        champions = self.get_owned_champions()
+        champion_ids: set[int] = set()
+
+        for champion in champions:
+            champion_id = champion.get("id")
+
+            if champion_id is None:
+                continue
+
+            try:
+                champion_ids.add(int(champion_id))
+            except (TypeError, ValueError):
+                continue
+
+        return champion_ids

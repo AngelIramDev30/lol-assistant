@@ -196,3 +196,72 @@ def draft_recommendations() -> dict:
             status_code=500,
             detail=str(error),
         ) from error
+
+
+@app.get("/league/owned-champions")
+def owned_champions() -> dict:
+    connect_league_client()
+
+    try:
+        champions = league_client.get_owned_champions()
+        normalized: list[dict] = []
+
+        for champion in champions:
+            champion_id = champion.get("id")
+
+            if champion_id is None:
+                continue
+
+            try:
+                champion_id = int(champion_id)
+            except (TypeError, ValueError):
+                continue
+
+            static_data = data_dragon.get_champion(
+                champion_id
+            )
+
+            champion_name = None
+
+            if static_data is not None:
+                champion_name = static_data.get("name")
+
+            if not champion_name:
+                champion_name = champion.get("name")
+
+            normalized.append(
+                {
+                    "championId": champion_id,
+                    "championName": champion_name,
+                    "freeToPlay": bool(
+                        champion.get("freeToPlay", False)
+                    ),
+                    "owned": True,
+                }
+            )
+
+        normalized.sort(
+            key=lambda item: (
+                str(item.get("championName") or "")
+            ).lower()
+        )
+
+        return {
+            "count": len(normalized),
+            "champions": normalized,
+        }
+
+    except RequestException as error:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "No se pudieron obtener los campeones "
+                "de la cuenta."
+            ),
+        ) from error
+
+    except RuntimeError as error:
+        raise HTTPException(
+            status_code=500,
+            detail=str(error),
+        ) from error
