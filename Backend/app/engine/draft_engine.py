@@ -52,6 +52,7 @@ class DraftEngine:
         return {
             "role": context.role,
             "pickOrder": context.pick_order,
+            "knownAllies": ally_ids,
             "knownEnemies": enemy_ids,
             "bannedChampionIds": banned_ids,
             "recommendations": recommendations,

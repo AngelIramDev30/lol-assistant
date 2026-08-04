@@ -1,26 +1,31 @@
-from fastapi import FastAPI, HTTPException
+﻿from fastapi import FastAPI, HTTPException
 from requests import RequestException
+
+from app.engine.champion_select_engine import ChampionSelectEngine
 from app.engine.draft_engine import DraftEngine
 from app.engine.plugins.blind_pick.blind_pick_plugin import BlindPickPlugin
 from app.engine.plugins.matchup.matchup_plugin import MatchupPlugin
 from app.engine.plugins.meta.meta_plugin import MetaPlugin
 from app.engine.scoring_engine import ScoringEngine
-from app.engine.champion_select_engine import ChampionSelectEngine
 from app.services.data_dragon_service import DataDragonService
-
 from app.services.league_client import LeagueClient
 
 
 app = FastAPI(
     title="LoL Assistant",
-    version="0.3.0",
+    version="0.4.0",
     description="League of Legends AI Assistant",
 )
 
-league_client = LeagueClient()
+LEAGUE_PATH = r"D:\Riot Games\League of Legends"
 
+league_client = LeagueClient()
 data_dragon = DataDragonService(locale="es_MX")
-champion_select_engine = ChampionSelectEngine(data_dragon)
+
+champion_select_engine = ChampionSelectEngine(
+    data_dragon=data_dragon,
+)
+
 scoring_engine = ScoringEngine(
     plugins=[
         MetaPlugin(),
@@ -29,8 +34,9 @@ scoring_engine = ScoringEngine(
     ]
 )
 
-draft_engine = DraftEngine(scoring_engine)
-LEAGUE_PATH = r"D:\Riot Games\League of Legends"
+draft_engine = DraftEngine(
+    scoring_engine=scoring_engine,
+)
 
 
 def connect_league_client() -> None:
@@ -138,6 +144,13 @@ def champion_select() -> dict:
             detail="No se pudo leer Champion Select.",
         ) from error
 
+    except RuntimeError as error:
+        raise HTTPException(
+            status_code=500,
+            detail=str(error),
+        ) from error
+
+
 @app.get("/league/draft-recommendations")
 def draft_recommendations() -> dict:
     connect_league_client()
@@ -151,13 +164,15 @@ def draft_recommendations() -> dict:
                 "message": "No estás en selección de campeón.",
             }
 
-        champion_select_data = champion_select_engine.analyze(session)
+        champion_select_data = champion_select_engine.analyze(
+            session
+        )
 
-        all_champions = data_dragon.get_all_champions()
+        candidates = data_dragon.get_all_champions()
 
         draft_result = draft_engine.recommend(
             champion_select=champion_select_data,
-            candidates=all_champions,
+            candidates=candidates,
             limit=5,
         )
 
@@ -170,7 +185,10 @@ def draft_recommendations() -> dict:
     except RequestException as error:
         raise HTTPException(
             status_code=502,
-            detail="No se pudo leer la selección de campeón.",
+            detail=(
+                "No se pudo leer la selección de campeón "
+                "o descargar Data Dragon."
+            ),
         ) from error
 
     except RuntimeError as error:
@@ -178,11 +196,3 @@ def draft_recommendations() -> dict:
             status_code=500,
             detail=str(error),
         ) from error
-    
-    except RuntimeError as error:
-        raise HTTPException(
-            status_code=500,
-            detail=str(error),
-        ) from error
-
-    

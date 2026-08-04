@@ -4,7 +4,9 @@ import requests
 
 
 class DataDragonService:
-    VERSIONS_URL = "https://ddragon.leagueoflegends.com/api/versions.json"
+    VERSIONS_URL = (
+        "https://ddragon.leagueoflegends.com/api/versions.json"
+    )
 
     def __init__(self, locale: str = "es_MX") -> None:
         self.locale = locale
@@ -82,3 +84,15 @@ class DataDragonService:
             )
 
         return self.version
+
+    def get_all_champions(self) -> list[dict[str, Any]]:
+        self.ensure_loaded()
+
+        return [
+            {
+                "championId": champion_id,
+                "championName": champion["name"],
+            }
+            for champion_id, champion
+            in self.champions_by_id.items()
+        ]
