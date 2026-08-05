@@ -66,7 +66,7 @@ class DraftEngine:
                 "patch": champion_select.get("patch"),
                 "region": "la1",
                 "queue": "420",
-                "rank": "sample_local",
+                "rank": "emerald_plus",
                 "enemyNamesById": enemy_names_by_id,
             },
         )
