@@ -5,10 +5,10 @@ from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
-from app.database.models.champion_meta import ChampionMeta
+from app.database.models.champion_matchup import ChampionMatchup
 
 
-class ChampionMetaRepository:
+class ChampionMatchupRepository:
     def __init__(self, database: Session) -> None:
         self.database = database
 
@@ -22,14 +22,12 @@ class ChampionMetaRepository:
         now = datetime.now(UTC)
 
         for row in rows:
-            values = {
-                **row,
-                "updated_at": now,
-            }
-
             statement = sqlite_insert(
-                ChampionMeta
-            ).values(**values)
+                ChampionMatchup
+            ).values(
+                **row,
+                updated_at=now,
+            )
 
             statement = statement.on_conflict_do_update(
                 index_elements=[
@@ -39,12 +37,15 @@ class ChampionMetaRepository:
                     "role",
                     "rank",
                     "champion_id",
+                    "enemy_champion_id",
                 ],
                 set_={
                     "games": statement.excluded.games,
                     "wins": statement.excluded.wins,
                     "win_rate": statement.excluded.win_rate,
-                    "pick_rate": statement.excluded.pick_rate,
+                    "gold_diff": statement.excluded.gold_diff,
+                    "cs_diff": statement.excluded.cs_diff,
+                    "kill_diff": statement.excluded.kill_diff,
                     "updated_at": statement.excluded.updated_at,
                 },
             )
@@ -62,41 +63,16 @@ class ChampionMetaRepository:
         role: str,
         rank: str,
         champion_id: int,
-    ) -> ChampionMeta | None:
-        statement = select(ChampionMeta).where(
-            ChampionMeta.patch == patch,
-            ChampionMeta.region == region,
-            ChampionMeta.queue == queue,
-            ChampionMeta.role == role,
-            ChampionMeta.rank == rank,
-            ChampionMeta.champion_id == champion_id,
+        enemy_champion_id: int,
+    ) -> ChampionMatchup | None:
+        statement = select(ChampionMatchup).where(
+            ChampionMatchup.patch == patch,
+            ChampionMatchup.region == region,
+            ChampionMatchup.queue == queue,
+            ChampionMatchup.role == role,
+            ChampionMatchup.rank == rank,
+            ChampionMatchup.champion_id == champion_id,
+            ChampionMatchup.enemy_champion_id == enemy_champion_id,
         )
 
         return self.database.scalar(statement)
-
-    def get_for_context(
-        self,
-        patch: str,
-        region: str,
-        queue: str,
-        role: str,
-        rank: str,
-    ) -> list[ChampionMeta]:
-        statement = (
-            select(ChampionMeta)
-            .where(
-                ChampionMeta.patch == patch,
-                ChampionMeta.region == region,
-                ChampionMeta.queue == queue,
-                ChampionMeta.role == role,
-                ChampionMeta.rank == rank,
-            )
-            .order_by(
-                ChampionMeta.win_rate.desc(),
-                ChampionMeta.games.desc(),
-            )
-        )
-
-        return list(
-            self.database.scalars(statement).all()
-        )

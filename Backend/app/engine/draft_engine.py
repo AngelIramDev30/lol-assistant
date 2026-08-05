@@ -1,11 +1,14 @@
-﻿from typing import Any
+from typing import Any
 
 from app.engine.plugins.base import RecommendationContext
 from app.engine.scoring_engine import ScoringEngine
 
 
 class DraftEngine:
-    def __init__(self, scoring_engine: ScoringEngine) -> None:
+    def __init__(
+        self,
+        scoring_engine: ScoringEngine,
+    ) -> None:
         self.scoring_engine = scoring_engine
 
     def recommend(
@@ -17,36 +20,61 @@ class DraftEngine:
     ) -> dict[str, Any]:
         enemy_ids = [
             int(player["championId"])
-            for player in champion_select.get("enemies", [])
+            for player in champion_select.get(
+                "enemies",
+                [],
+            )
             if player.get("championId")
         ]
 
         ally_ids = [
             int(player["championId"])
-            for player in champion_select.get("allies", [])
+            for player in champion_select.get(
+                "allies",
+                [],
+            )
             if player.get("championId")
         ]
 
         banned_ids = [
             int(ban["championId"])
-            for ban in champion_select.get("bans", [])
+            for ban in champion_select.get(
+                "bans",
+                [],
+            )
             if ban.get("championId")
             and ban.get("completed", False)
         ]
 
         context = RecommendationContext(
-            role=champion_select.get("assignedPosition"),
-            pick_order=champion_select.get("pickOrder"),
+            role=champion_select.get(
+                "assignedPosition"
+            ),
+            pick_order=champion_select.get(
+                "pickOrder"
+            ),
             ally_champion_ids=ally_ids,
             enemy_champion_ids=enemy_ids,
             banned_champion_ids=banned_ids,
-            owned_champion_ids=owned_champion_ids or set(),
+            owned_champion_ids=(
+                owned_champion_ids or set()
+            ),
+            metadata={
+                "patch": champion_select.get(
+                    "patch"
+                ),
+                "region": "la1",
+                "queue": "420",
+                "rank": "sample_local",
+            },
         )
 
-        recommendations = self.scoring_engine.rank_champions(
-            champions=candidates,
-            context=context,
-            limit=limit,
+        recommendations = (
+            self.scoring_engine.rank_champions(
+                champions=candidates,
+                context=context,
+                limit=limit,
+            )
         )
 
         return {
@@ -55,5 +83,6 @@ class DraftEngine:
             "knownAllies": ally_ids,
             "knownEnemies": enemy_ids,
             "bannedChampionIds": banned_ids,
+            "metaContext": context.metadata,
             "recommendations": recommendations,
         }
