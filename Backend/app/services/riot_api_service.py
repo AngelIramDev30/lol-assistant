@@ -1,4 +1,4 @@
-﻿import os
+import os
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +25,7 @@ class RiotApiService:
 
         if not self.api_key:
             raise RuntimeError(
-                "RIOT_API_KEY no está configurada en Backend/.env."
+                "RIOT_API_KEY no est? configurada en Backend/.env."
             )
 
     def _request(
@@ -49,12 +49,12 @@ class RiotApiService:
 
         if response.status_code == 401:
             raise RuntimeError(
-                "La Riot API Key es inválida."
+                "La Riot API Key es inv?lida."
             )
 
         if response.status_code == 403:
             raise RuntimeError(
-                "La Riot API Key expiró."
+                "La Riot API Key expir?."
             )
 
         if response.status_code == 429:
@@ -85,11 +85,56 @@ class RiotApiService:
 
         if not isinstance(data, dict):
             raise RuntimeError(
-                "Respuesta inválida."
+                "Respuesta inv?lida."
             )
 
         return data
 
+    def get_ranked_entries(
+        self,
+        tier: str = "EMERALD",
+        division: str = "I",
+        page: int = 1,
+        queue: str = "RANKED_SOLO_5x5",
+    ) -> list[dict[str, Any]]:
+        data = self._request(
+            host=self.platform_region,
+            endpoint=(
+                f"/lol/league/v4/entries/{queue}/"
+                f"{tier.upper()}/{division.upper()}"
+            ),
+            params={"page": page},
+        )
+
+        if not isinstance(data, list):
+            raise RuntimeError(
+                "Riot devolvi? entradas clasificatorias inv?lidas."
+            )
+
+        return [
+            entry
+            for entry in data
+            if isinstance(entry, dict)
+        ]
+
+    def get_summoner_by_id(
+        self,
+        summoner_id: str,
+    ) -> dict[str, Any]:
+        data = self._request(
+            host=self.platform_region,
+            endpoint=(
+                "/lol/summoner/v4/summoners/"
+                f"{summoner_id}"
+            ),
+        )
+
+        if not isinstance(data, dict):
+            raise RuntimeError(
+                "Riot devolvi? un invocador inv?lido."
+            )
+
+        return data
     def get_match_ids(
         self,
         puuid: str,
@@ -114,7 +159,7 @@ class RiotApiService:
 
         if not isinstance(data, list):
             raise RuntimeError(
-                "Respuesta inválida."
+                "Respuesta inv?lida."
             )
 
         return [str(match) for match in data]
@@ -131,7 +176,8 @@ class RiotApiService:
 
         if not isinstance(data, dict):
             raise RuntimeError(
-                "Respuesta inválida."
+                "Respuesta inv?lida."
             )
 
         return data
+
