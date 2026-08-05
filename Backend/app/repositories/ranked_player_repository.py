@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import nullsfirst, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
@@ -78,9 +78,38 @@ class RankedPlayerRepository:
             self.database.scalars(statement).all()
         )
 
+    def get_next_to_scan(
+        self,
+        region: str,
+        tier: str,
+        limit: int = 5,
+    ) -> list[RankedPlayer]:
+        statement = (
+            select(RankedPlayer)
+            .where(
+                RankedPlayer.region == region.lower(),
+                RankedPlayer.tier == tier.upper(),
+                RankedPlayer.active.is_(True),
+            )
+            .order_by(
+                nullsfirst(RankedPlayer.last_match_scan.asc()),
+                RankedPlayer.league_points.desc(),
+            )
+            .limit(limit)
+        )
+
+        return list(
+            self.database.scalars(statement).all()
+        )
+
     def mark_scanned(
         self,
         player: RankedPlayer,
+        commit: bool = True,
     ) -> None:
         player.last_match_scan = datetime.now(UTC)
-        self.database.commit()
+
+        if commit:
+            self.database.commit()
+        else:
+            self.database.flush()
