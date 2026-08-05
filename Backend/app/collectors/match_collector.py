@@ -1,3 +1,4 @@
+import time
 from dataclasses import dataclass
 
 from app.database.session import SessionLocal
@@ -33,11 +34,14 @@ class MatchCollector:
     def collect_for_puuid(
         self,
         puuid: str,
+        start: int = 0,
         count: int = 5,
         queue: int = 420,
+        delay_seconds: float = 0.30,
     ) -> CollectionResult:
         match_ids = self.riot_api.get_match_ids(
             puuid=puuid,
+            start=start,
             count=count,
             queue=queue,
         )
@@ -50,9 +54,13 @@ class MatchCollector:
         with SessionLocal() as database:
             repository = MatchRepository(database)
 
-            for match_id in match_ids:
+            for index, match_id in enumerate(match_ids, start=1):
                 if repository.exists(match_id):
                     skipped += 1
+                    print(
+                        f"[{index}/{len(match_ids)}] "
+                        f"{match_id}: ya existe"
+                    )
                     continue
 
                 try:
@@ -66,13 +74,22 @@ class MatchCollector:
 
                     stored += 1
 
+                    print(
+                        f"[{index}/{len(match_ids)}] "
+                        f"{match_id}: guardada"
+                    )
+
                 except Exception as error:
                     database.rollback()
                     failed += 1
+
                     print(
-                        f"[ERROR] {match_id}: "
+                        f"[{index}/{len(match_ids)}] "
+                        f"{match_id}: ERROR "
                         f"{type(error).__name__}: {error}"
                     )
+
+                time.sleep(delay_seconds)
 
         return CollectionResult(
             requested=len(match_ids),
