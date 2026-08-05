@@ -18,30 +18,33 @@ class DraftEngine:
         owned_champion_ids: set[int] | None = None,
         limit: int = 5,
     ) -> dict[str, Any]:
+        enemies = champion_select.get("enemies", [])
+        allies = champion_select.get("allies", [])
+
         enemy_ids = [
             int(player["championId"])
-            for player in champion_select.get(
-                "enemies",
-                [],
-            )
+            for player in enemies
             if player.get("championId")
         ]
 
         ally_ids = [
             int(player["championId"])
-            for player in champion_select.get(
-                "allies",
-                [],
-            )
+            for player in allies
             if player.get("championId")
         ]
 
+        enemy_names_by_id = {
+            int(player["championId"]): (
+                player.get("championName")
+                or f"ID {player['championId']}"
+            )
+            for player in enemies
+            if player.get("championId")
+        }
+
         banned_ids = [
             int(ban["championId"])
-            for ban in champion_select.get(
-                "bans",
-                [],
-            )
+            for ban in champion_select.get("bans", [])
             if ban.get("championId")
             and ban.get("completed", False)
         ]
@@ -60,12 +63,11 @@ class DraftEngine:
                 owned_champion_ids or set()
             ),
             metadata={
-                "patch": champion_select.get(
-                    "patch"
-                ),
+                "patch": champion_select.get("patch"),
                 "region": "la1",
                 "queue": "420",
                 "rank": "sample_local",
+                "enemyNamesById": enemy_names_by_id,
             },
         )
 
