@@ -1,9 +1,10 @@
 from dataclasses import dataclass
 
-from sqlalchemy import func, select
+from sqlalchemy import Integer, func, select
 from sqlalchemy.orm import Session
 
 from app.models.match import Match
+from app.models.match_dataset import MatchDataset
 from app.models.participant import Participant
 from app.repositories.champion_meta_repository import (
     ChampionMetaRepository,
@@ -15,7 +16,7 @@ class MetaCalculationResult:
     patch: str
     region: str
     queue: int
-    rank: str
+    dataset: str
     rows_written: int
     participants_analyzed: int
 
@@ -24,7 +25,7 @@ class MetaCalculationResult:
             "patch": self.patch,
             "region": self.region,
             "queue": self.queue,
-            "rank": self.rank,
+            "dataset": self.dataset,
             "rowsWritten": self.rows_written,
             "participantsAnalyzed": self.participants_analyzed,
         }
@@ -47,13 +48,14 @@ class MetaCalculatorService:
         self,
         patch: str,
         region: str,
+        dataset: str,
         queue: int = 420,
-        rank: str = "sample_local",
     ) -> MetaCalculationResult:
         participants_analyzed = self._count_participants(
             patch=patch,
             region=region,
             queue=queue,
+            dataset=dataset,
         )
 
         rows: list[dict] = []
@@ -65,7 +67,7 @@ class MetaCalculatorService:
                     region=region,
                     queue=queue,
                     role=role,
-                    rank=rank,
+                    dataset=dataset,
                 )
             )
 
@@ -75,7 +77,7 @@ class MetaCalculatorService:
             patch=patch,
             region=region,
             queue=queue,
-            rank=rank,
+            dataset=dataset,
             rows_written=rows_written,
             participants_analyzed=participants_analyzed,
         )
@@ -86,20 +88,28 @@ class MetaCalculatorService:
         region: str,
         queue: int,
         role: str,
-        rank: str,
+        dataset: str,
     ) -> list[dict]:
+        filters = (
+            Match.patch == patch,
+            Match.region == region,
+            Match.queue == queue,
+            MatchDataset.dataset == dataset,
+            Participant.role == role,
+            Participant.champion_id > 0,
+        )
+
         total_role_slots = self.database.scalar(
             select(func.count(Participant.id))
             .join(
                 Match,
                 Match.id == Participant.match_db_id,
             )
-            .where(
-                Match.patch == patch,
-                Match.region == region,
-                Match.queue == queue,
-                Participant.role == role,
+            .join(
+                MatchDataset,
+                MatchDataset.match_db_id == Match.id,
             )
+            .where(*filters)
         ) or 0
 
         if total_role_slots == 0:
@@ -117,13 +127,11 @@ class MetaCalculatorService:
                 Match,
                 Match.id == Participant.match_db_id,
             )
-            .where(
-                Match.patch == patch,
-                Match.region == region,
-                Match.queue == queue,
-                Participant.role == role,
-                Participant.champion_id > 0,
+            .join(
+                MatchDataset,
+                MatchDataset.match_db_id == Match.id,
             )
+            .where(*filters)
             .group_by(Participant.champion_id)
         )
 
@@ -138,28 +146,24 @@ class MetaCalculatorService:
             if games_value <= 0:
                 continue
 
-            win_rate = round(
-                wins_value / games_value * 100,
-                2,
-            )
-
-            pick_rate = round(
-                games_value / total_role_slots * 100,
-                2,
-            )
-
             rows.append(
                 {
                     "patch": patch,
                     "region": region,
                     "queue": str(queue),
                     "role": role,
-                    "rank": rank,
+                    "rank": dataset,
                     "champion_id": int(champion_id),
                     "games": games_value,
                     "wins": wins_value,
-                    "win_rate": win_rate,
-                    "pick_rate": pick_rate,
+                    "win_rate": round(
+                        wins_value / games_value * 100,
+                        2,
+                    ),
+                    "pick_rate": round(
+                        games_value / total_role_slots * 100,
+                        2,
+                    ),
                 }
             )
 
@@ -170,6 +174,7 @@ class MetaCalculatorService:
         patch: str,
         region: str,
         queue: int,
+        dataset: str,
     ) -> int:
         value = self.database.scalar(
             select(func.count(Participant.id))
@@ -177,15 +182,16 @@ class MetaCalculatorService:
                 Match,
                 Match.id == Participant.match_db_id,
             )
+            .join(
+                MatchDataset,
+                MatchDataset.match_db_id == Match.id,
+            )
             .where(
                 Match.patch == patch,
                 Match.region == region,
                 Match.queue == queue,
+                MatchDataset.dataset == dataset,
             )
         )
 
         return int(value or 0)
-
-
-# Import aqu? para mantener visible el tipo usado por SQLAlchemy.
-from sqlalchemy import Integer

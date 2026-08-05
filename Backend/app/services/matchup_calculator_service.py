@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.match import Match
+from app.models.match_dataset import MatchDataset
 from app.models.participant import Participant
 from app.repositories.champion_matchup_repository import (
     ChampionMatchupRepository,
@@ -17,7 +18,7 @@ class MatchupCalculationResult:
     patch: str
     region: str
     queue: int
-    rank: str
+    dataset: str
     matchups_written: int
     lane_pairs_analyzed: int
 
@@ -26,7 +27,7 @@ class MatchupCalculationResult:
             "patch": self.patch,
             "region": self.region,
             "queue": self.queue,
-            "rank": self.rank,
+            "dataset": self.dataset,
             "matchupsWritten": self.matchups_written,
             "lanePairsAnalyzed": self.lane_pairs_analyzed,
         }
@@ -49,8 +50,8 @@ class MatchupCalculatorService:
         self,
         patch: str,
         region: str,
+        dataset: str,
         queue: int = 420,
-        rank: str = "sample_local",
     ) -> MatchupCalculationResult:
         statement = (
             select(Match, Participant)
@@ -58,22 +59,30 @@ class MatchupCalculatorService:
                 Participant,
                 Participant.match_db_id == Match.id,
             )
+            .join(
+                MatchDataset,
+                MatchDataset.match_db_id == Match.id,
+            )
             .where(
                 Match.patch == patch,
                 Match.region == region,
                 Match.queue == queue,
+                MatchDataset.dataset == dataset,
                 Participant.role.in_(self.VALID_ROLES),
                 Participant.champion_id > 0,
             )
             .order_by(Match.id)
         )
 
-        matches: dict[int, dict[str, list[Participant]]] = defaultdict(
-            lambda: defaultdict(list)
-        )
+        matches: dict[
+            int,
+            dict[str, list[Participant]],
+        ] = defaultdict(lambda: defaultdict(list))
 
         for match, participant in self.database.execute(statement):
-            matches[match.id][participant.role].append(participant)
+            matches[match.id][participant.role].append(
+                participant
+            )
 
         aggregates: dict[
             tuple[str, int, int],
@@ -135,7 +144,7 @@ class MatchupCalculatorService:
                     "region": region,
                     "queue": str(queue),
                     "role": role,
-                    "rank": rank,
+                    "rank": dataset,
                     "champion_id": champion_id,
                     "enemy_champion_id": enemy_champion_id,
                     "games": games,
@@ -165,7 +174,7 @@ class MatchupCalculatorService:
             patch=patch,
             region=region,
             queue=queue,
-            rank=rank,
+            dataset=dataset,
             matchups_written=written,
             lane_pairs_analyzed=lane_pairs,
         )
@@ -187,6 +196,12 @@ class MatchupCalculatorService:
 
         values["games"] += 1
         values["wins"] += int(player.win)
-        values["gold_diff_total"] += player.gold - enemy.gold
-        values["cs_diff_total"] += player.cs - enemy.cs
-        values["kill_diff_total"] += player.kills - enemy.kills
+        values["gold_diff_total"] += (
+            player.gold - enemy.gold
+        )
+        values["cs_diff_total"] += (
+            player.cs - enemy.cs
+        )
+        values["kill_diff_total"] += (
+            player.kills - enemy.kills
+        )
