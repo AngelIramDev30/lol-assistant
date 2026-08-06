@@ -73,3 +73,30 @@ class PlayerChampionStatRepository:
         )
 
         return self.database.scalar(statement)
+
+    def get_recent(
+        self,
+        profile: str,
+        queue: str,
+        role: str,
+        champion_id: int,
+        limit: int = 5,
+    ) -> list[PlayerChampionStat]:
+        statement = (
+            select(PlayerChampionStat)
+            .where(
+                PlayerChampionStat.profile == profile,
+                PlayerChampionStat.queue == queue,
+                PlayerChampionStat.role == role,
+                PlayerChampionStat.champion_id == champion_id,
+            )
+            .order_by(
+                PlayerChampionStat.updated_at.desc(),
+                PlayerChampionStat.patch.desc(),
+            )
+            .limit(limit)
+        )
+
+        return list(
+            self.database.scalars(statement).all()
+        )

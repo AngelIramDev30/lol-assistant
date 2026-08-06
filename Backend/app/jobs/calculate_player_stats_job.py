@@ -1,6 +1,6 @@
 ﻿import json
 
-from sqlalchemy import select
+from sqlalchemy import distinct, select
 
 from app.database.models.champion_meta import Base
 from app.database.models.player_champion_stat import (
@@ -17,6 +17,7 @@ from app.services.riot_api_service import RiotApiService
 
 
 LEAGUE_PATH = r"D:\Riot Games\League of Legends"
+QUEUE_ID = 420
 
 
 def main() -> None:
@@ -30,7 +31,8 @@ def main() -> None:
 
     if not league_client.find_lockfile(LEAGUE_PATH):
         raise RuntimeError(
-            "Abre League Client antes de calcular tus estadísticas."
+            "Abre League Client antes de calcular "
+            "tus estadísticas."
         )
 
     profile = league_client.get_current_summoner()
@@ -57,29 +59,34 @@ def main() -> None:
         tag_line=str(tag_line),
     )
 
-    puuid = str(account.get("puuid") or "")
+    puuid = str(account.get("puuid") or "").strip()
 
     if not puuid:
         raise RuntimeError(
-            "Riot no devolvió tu PUUID."
+            "Riot no devolvió tu PUUID oficial."
         )
+
+    results: list[dict] = []
+    total_participants = 0
+    total_rows = 0
 
     with SessionLocal() as database:
-        latest_patch = database.scalar(
-            select(Match.patch)
-            .join(
-                Participant,
-                Participant.match_db_id == Match.id,
-            )
-            .where(
-                Participant.puuid == puuid,
-                Match.queue == 420,
-            )
-            .order_by(Match.game_creation.desc())
-            .limit(1)
+        patches = list(
+            database.scalars(
+                select(distinct(Match.patch))
+                .join(
+                    Participant,
+                    Participant.match_db_id == Match.id,
+                )
+                .where(
+                    Participant.puuid == puuid,
+                    Match.queue == QUEUE_ID,
+                )
+                .order_by(Match.patch.desc())
+            ).all()
         )
 
-        if not latest_patch:
+        if not patches:
             raise RuntimeError(
                 "No existen partidas personales guardadas."
             )
@@ -88,18 +95,29 @@ def main() -> None:
             database
         )
 
-        result = calculator.calculate(
-            puuid=puuid,
-            patch=str(latest_patch),
-            queue=420,
-            profile="current",
-        )
+        for patch in patches:
+            result = calculator.calculate(
+                puuid=puuid,
+                patch=str(patch),
+                queue=QUEUE_ID,
+                profile="current",
+            )
+
+            total_participants += (
+                result.participants_analyzed
+            )
+            total_rows += result.rows_written
+
+            results.append(result.to_dict())
 
     print(
         json.dumps(
             {
                 "riotId": f"{game_name}#{tag_line}",
-                **result.to_dict(),
+                "patchesProcessed": len(results),
+                "participantsAnalyzed": total_participants,
+                "rowsWritten": total_rows,
+                "patches": results,
             },
             indent=2,
             ensure_ascii=False,
