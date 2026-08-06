@@ -1,4 +1,4 @@
-import os
+﻿import os
 
 from app.database.session import SessionLocal
 from app.domain.score import ScoreContribution
@@ -15,6 +15,9 @@ class MetaPlugin(ScoringPlugin):
     name = "meta"
     weight = 0.30
 
+    PRIMARY_DATASET = "emerald_plus"
+    FALLBACK_DATASET = "sample_local"
+
     def evaluate(
         self,
         champion_id: int,
@@ -24,7 +27,6 @@ class MetaPlugin(ScoringPlugin):
         patch = self._normalize_patch(
             str(context.metadata.get("patch") or "")
         )
-
         role = self._normalize_role(context.role)
 
         region = str(
@@ -33,24 +35,17 @@ class MetaPlugin(ScoringPlugin):
         ).lower()
 
         queue = str(
-            context.metadata.get("queue")
-            or "420"
+            context.metadata.get("queue") or "420"
         )
 
-        configured_rank = str(
+        preferred_dataset = str(
             context.metadata.get("rank")
-            or os.getenv(
-                "META_DATASET_RANK",
-                "sample_local",
-            )
+            or self.PRIMARY_DATASET
         ).lower()
 
         if not patch or role is None:
-            return self._neutral_contribution(
-                reason=(
-                    "Faltan parche o rol para consultar "
-                    "estad?sticas de meta."
-                )
+            return self._unknown_contribution(
+                "Faltan parche o rol para consultar el meta."
             )
 
         with SessionLocal() as database:
@@ -61,29 +56,27 @@ class MetaPlugin(ScoringPlugin):
                 region=region,
                 queue=queue,
                 role=role,
-                rank=configured_rank,
+                rank=preferred_dataset,
                 champion_id=champion_id,
             )
 
-            if (
-                stats is None
-                and configured_rank != "sample_local"
-            ):
+            dataset_used = preferred_dataset
+
+            if stats is None:
                 stats = repository.get_one(
                     patch=patch,
                     region=region,
                     queue=queue,
                     role=role,
-                    rank="sample_local",
+                    rank=self.FALLBACK_DATASET,
                     champion_id=champion_id,
                 )
+                dataset_used = self.FALLBACK_DATASET
 
         if stats is None:
-            return self._neutral_contribution(
-                reason=(
-                    f"Sin datos para {champion_name} "
-                    f"en {role}, parche {patch}."
-                )
+            return self._unknown_contribution(
+                f"Sin datos para {champion_name} en "
+                f"{role}, parche {patch}."
             )
 
         raw_score = self._calculate_raw_score(
@@ -92,22 +85,26 @@ class MetaPlugin(ScoringPlugin):
             pick_rate=stats.pick_rate,
         )
 
-        weighted_score = raw_score * self.weight
-
         confidence = min(
             stats.games / 50.0,
             1.0,
         )
 
+        dataset_text = (
+            "Emerald+"
+            if dataset_used == self.PRIMARY_DATASET
+            else "muestra local de respaldo"
+        )
+
         return ScoreContribution(
             engine=self.name,
-            score=round(weighted_score, 2),
+            score=round(raw_score * self.weight, 2),
             reason=(
-                f"Meta SQLite: {stats.games} partidas, "
+                f"Meta SQLite ({dataset_text}): "
+                f"{stats.games} partidas, "
                 f"{stats.win_rate:.2f}% WR, "
                 f"{stats.pick_rate:.2f}% pick rate. "
-                f"Confianza de muestra: "
-                f"{confidence * 100:.0f}%."
+                f"Confianza {confidence * 100:.0f}%."
             ),
         )
 
@@ -117,30 +114,30 @@ class MetaPlugin(ScoringPlugin):
         wins: int,
         pick_rate: float,
     ) -> float:
-        # Suavizado bayesiano:
-        # a?ade 10 partidas virtuales con 50% de win rate.
+        # Prior conservador:
+        # 20 partidas virtuales con 50% de win rate.
         adjusted_win_rate = (
-            (wins + 5)
-            / (games + 10)
+            (wins + 10)
+            / (games + 20)
             * 100
         )
 
-        win_component = adjusted_win_rate * 0.75
-
-        pick_component = min(
+        # La popularidad suma, pero no domina el resultado.
+        pick_bonus = min(
             max(pick_rate, 0.0),
             20.0,
-        ) / 20.0 * 20.0
+        ) / 20.0 * 10.0
 
-        sample_component = min(
+        # La confianza aumenta lentamente con la muestra.
+        sample_bonus = min(
             games / 50.0,
             1.0,
         ) * 5.0
 
         raw_score = (
-            win_component
-            + pick_component
-            + sample_component
+            adjusted_win_rate
+            + pick_bonus
+            + sample_bonus
         )
 
         return max(
@@ -148,16 +145,18 @@ class MetaPlugin(ScoringPlugin):
             min(100.0, raw_score),
         )
 
-    def _neutral_contribution(
+    def _unknown_contribution(
         self,
         reason: str,
     ) -> ScoreContribution:
-        neutral_raw_score = 50.0
+        # Desconocido no significa malo, pero recibe una
+        # pequeña penalización frente a datos reales.
+        unknown_raw_score = 47.5
 
         return ScoreContribution(
             engine=self.name,
             score=round(
-                neutral_raw_score * self.weight,
+                unknown_raw_score * self.weight,
                 2,
             ),
             reason=reason,
@@ -178,7 +177,7 @@ class MetaPlugin(ScoringPlugin):
     def _normalize_role(
         role: str | None,
     ) -> str | None:
-        if role is None:
+        if not role:
             return None
 
         aliases = {
