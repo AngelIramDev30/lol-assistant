@@ -1,6 +1,8 @@
-import os
+﻿import os
+import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import requests
 from dotenv import load_dotenv
@@ -12,20 +14,24 @@ load_dotenv(BACKEND_DIR / ".env", override=True)
 
 class RiotApiService:
     def __init__(self) -> None:
-        self.api_key = os.getenv("RIOT_API_KEY")
+        self.api_key = (
+            os.getenv("RIOT_API_KEY") or ""
+        ).strip()
+
         self.platform_region = os.getenv(
             "RIOT_REGION",
             "la1",
-        ).lower()
+        ).strip().lower()
 
         self.routing_region = os.getenv(
             "RIOT_ROUTING_REGION",
             "americas",
-        ).lower()
+        ).strip().lower()
 
         if not self.api_key:
             raise RuntimeError(
-                "RIOT_API_KEY no est? configurada en Backend/.env."
+                "RIOT_API_KEY no está configurada "
+                "en Backend/.env."
             )
 
     def _request(
@@ -33,59 +39,172 @@ class RiotApiService:
         host: str,
         endpoint: str,
         params: dict[str, Any] | None = None,
+        max_attempts: int = 4,
     ) -> Any:
-
         if not endpoint.startswith("/"):
             endpoint = f"/{endpoint}"
 
-        response = requests.get(
-            url=f"https://{host}.api.riotgames.com{endpoint}",
-            headers={
-                "X-Riot-Token": self.api_key,
-            },
-            params=params,
-            timeout=15,
+        url = (
+            f"https://{host}.api.riotgames.com"
+            f"{endpoint}"
         )
 
-        if response.status_code == 401:
+        last_error: Exception | None = None
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = requests.get(
+                    url=url,
+                    headers={
+                        "X-Riot-Token": self.api_key,
+                    },
+                    params=params,
+                    timeout=20,
+                )
+
+            except requests.RequestException as error:
+                last_error = error
+
+                if attempt >= max_attempts:
+                    raise RuntimeError(
+                        "No se pudo conectar con Riot API "
+                        f"después de {max_attempts} intentos."
+                    ) from error
+
+                wait_seconds = min(
+                    2 ** (attempt - 1),
+                    8,
+                )
+
+                print(
+                    "[RIOT API] Error de red. "
+                    f"Reintento en {wait_seconds}s..."
+                )
+
+                time.sleep(wait_seconds)
+                continue
+
+            if response.status_code == 200:
+                if not response.content:
+                    return None
+
+                return response.json()
+
+            if response.status_code == 401:
+                raise RuntimeError(
+                    "Riot no recibió credenciales válidas. "
+                    "Revisa RIOT_API_KEY."
+                )
+
+            if response.status_code == 403:
+                raise RuntimeError(
+                    "La Riot API Key expiró, fue revocada "
+                    "o no tiene acceso a este endpoint."
+                )
+
+            if response.status_code == 404:
+                raise RuntimeError(
+                    "Riot no encontró el recurso solicitado."
+                )
+
+            if response.status_code == 429:
+                retry_after_header = response.headers.get(
+                    "Retry-After",
+                    "2",
+                )
+
+                try:
+                    retry_after = max(
+                        float(retry_after_header),
+                        1.0,
+                    )
+                except ValueError:
+                    retry_after = 2.0
+
+                rate_limit_type = response.headers.get(
+                    "X-Rate-Limit-Type",
+                    "unknown",
+                )
+
+                if attempt >= max_attempts:
+                    raise RuntimeError(
+                        "Se alcanzó el rate limit de Riot "
+                        f"({rate_limit_type}) y se agotaron "
+                        "los reintentos."
+                    )
+
+                print(
+                    "[RIOT API] Rate limit "
+                    f"({rate_limit_type}). "
+                    f"Esperando {retry_after:.1f}s..."
+                )
+
+                time.sleep(retry_after)
+                continue
+
+            if 500 <= response.status_code < 600:
+                if attempt >= max_attempts:
+                    response.raise_for_status()
+
+                wait_seconds = min(
+                    2 ** (attempt - 1),
+                    8,
+                )
+
+                print(
+                    "[RIOT API] Error temporal "
+                    f"{response.status_code}. "
+                    f"Reintento en {wait_seconds}s..."
+                )
+
+                time.sleep(wait_seconds)
+                continue
+
+            try:
+                error_body = response.json()
+            except ValueError:
+                error_body = response.text
+
             raise RuntimeError(
-                "La Riot API Key es inv?lida."
+                "Riot API devolvió "
+                f"HTTP {response.status_code}: "
+                f"{error_body}"
             )
 
-        if response.status_code == 403:
+        if last_error is not None:
             raise RuntimeError(
-                "La Riot API Key expir?."
-            )
+                "Riot API no respondió correctamente."
+            ) from last_error
 
-        if response.status_code == 429:
-            raise RuntimeError(
-                "Rate limit de Riot alcanzado."
-            )
-
-        response.raise_for_status()
-
-        if not response.content:
-            return None
-
-        return response.json()
+        raise RuntimeError(
+            "Riot API no respondió correctamente."
+        )
 
     def get_account_by_riot_id(
         self,
         game_name: str,
         tag_line: str,
     ) -> dict[str, Any]:
+        encoded_game_name = quote(
+            game_name,
+            safe="",
+        )
+        encoded_tag_line = quote(
+            tag_line,
+            safe="",
+        )
 
         data = self._request(
             host=self.routing_region,
             endpoint=(
                 "/riot/account/v1/accounts/by-riot-id/"
-                f"{game_name}/{tag_line}"
+                f"{encoded_game_name}/{encoded_tag_line}"
             ),
         )
 
         if not isinstance(data, dict):
             raise RuntimeError(
-                "Respuesta inv?lida."
+                "Riot devolvió una cuenta inválida."
             )
 
         return data
@@ -103,12 +222,15 @@ class RiotApiService:
                 f"/lol/league/v4/entries/{queue}/"
                 f"{tier.upper()}/{division.upper()}"
             ),
-            params={"page": page},
+            params={
+                "page": page,
+            },
         )
 
         if not isinstance(data, list):
             raise RuntimeError(
-                "Riot devolvi? entradas clasificatorias inv?lidas."
+                "Riot devolvió entradas "
+                "clasificatorias inválidas."
             )
 
         return [
@@ -125,16 +247,17 @@ class RiotApiService:
             host=self.platform_region,
             endpoint=(
                 "/lol/summoner/v4/summoners/"
-                f"{summoner_id}"
+                f"{quote(summoner_id, safe='')}"
             ),
         )
 
         if not isinstance(data, dict):
             raise RuntimeError(
-                "Riot devolvi? un invocador inv?lido."
+                "Riot devolvió un invocador inválido."
             )
 
         return data
+
     def get_match_ids(
         self,
         puuid: str,
@@ -142,9 +265,13 @@ class RiotApiService:
         count: int = 10,
         queue: int | None = 420,
     ) -> list[str]:
+        if count < 1 or count > 100:
+            raise ValueError(
+                "count debe estar entre 1 y 100."
+            )
 
         params: dict[str, Any] = {
-            "start": start,
+            "start": max(start, 0),
             "count": count,
         }
 
@@ -153,31 +280,39 @@ class RiotApiService:
 
         data = self._request(
             host=self.routing_region,
-            endpoint=f"/lol/match/v5/matches/by-puuid/{puuid}/ids",
+            endpoint=(
+                "/lol/match/v5/matches/by-puuid/"
+                f"{quote(puuid, safe='')}/ids"
+            ),
             params=params,
         )
 
         if not isinstance(data, list):
             raise RuntimeError(
-                "Respuesta inv?lida."
+                "Riot devolvió una lista "
+                "de partidas inválida."
             )
 
-        return [str(match) for match in data]
+        return [
+            str(match_id)
+            for match_id in data
+        ]
 
     def get_match(
         self,
         match_id: str,
     ) -> dict[str, Any]:
-
         data = self._request(
             host=self.routing_region,
-            endpoint=f"/lol/match/v5/matches/{match_id}",
+            endpoint=(
+                "/lol/match/v5/matches/"
+                f"{quote(match_id, safe='')}"
+            ),
         )
 
         if not isinstance(data, dict):
             raise RuntimeError(
-                "Respuesta inv?lida."
+                "Riot devolvió una partida inválida."
             )
 
         return data
-
