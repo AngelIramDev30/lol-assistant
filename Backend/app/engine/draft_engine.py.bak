@@ -1,9 +1,5 @@
-﻿from typing import Any
+from typing import Any
 
-from app.data.role_champions import (
-    filter_champions_by_role,
-    normalize_role,
-)
 from app.engine.plugins.base import RecommendationContext
 from app.engine.scoring_engine import ScoringEngine
 
@@ -24,21 +20,6 @@ class DraftEngine:
     ) -> dict[str, Any]:
         enemies = champion_select.get("enemies", [])
         allies = champion_select.get("allies", [])
-
-        assigned_position = champion_select.get(
-            "assignedPosition"
-        )
-
-        normalized_role = normalize_role(
-            assigned_position
-        )
-
-        # Segunda protección:
-        # el motor vuelve a filtrar aunque main.py ya lo haya hecho.
-        role_candidates = filter_champions_by_role(
-            champions=candidates,
-            role=normalized_role,
-        )
 
         enemy_ids = [
             int(player["championId"])
@@ -69,8 +50,12 @@ class DraftEngine:
         ]
 
         context = RecommendationContext(
-            role=normalized_role,
-            pick_order=champion_select.get("pickOrder"),
+            role=champion_select.get(
+                "assignedPosition"
+            ),
+            pick_order=champion_select.get(
+                "pickOrder"
+            ),
             ally_champion_ids=ally_ids,
             enemy_champion_ids=enemy_ids,
             banned_champion_ids=banned_ids,
@@ -88,21 +73,15 @@ class DraftEngine:
 
         recommendations = (
             self.scoring_engine.rank_champions(
-                champions=role_candidates,
+                champions=candidates,
                 context=context,
                 limit=limit,
             )
         )
 
         return {
-            "role": normalized_role,
+            "role": context.role,
             "pickOrder": context.pick_order,
-            "candidateCountBeforeRoleFilter": len(
-                candidates
-            ),
-            "candidateCountAfterRoleFilter": len(
-                role_candidates
-            ),
             "knownAllies": ally_ids,
             "knownEnemies": enemy_ids,
             "bannedChampionIds": banned_ids,
