@@ -1,9 +1,16 @@
-import time
+﻿import time
 from dataclasses import dataclass
 
 from app.database.session import SessionLocal
-from app.repositories.match_repository import MatchRepository
-from app.services.riot_api_service import RiotApiService
+from app.repositories.match_dataset_repository import (
+    MatchDatasetRepository,
+)
+from app.repositories.match_repository import (
+    MatchRepository,
+)
+from app.services.riot_api_service import (
+    RiotApiService,
+)
 
 
 @dataclass(frozen=True)
@@ -13,6 +20,7 @@ class CollectionResult:
     stored: int
     skipped: int
     failed: int
+    dataset_attached: int
 
     def to_dict(self) -> dict[str, int]:
         return {
@@ -21,6 +29,7 @@ class CollectionResult:
             "stored": self.stored,
             "skipped": self.skipped,
             "failed": self.failed,
+            "datasetAttached": self.dataset_attached,
         }
 
 
@@ -37,7 +46,8 @@ class MatchCollector:
         start: int = 0,
         count: int = 5,
         queue: int = 420,
-        delay_seconds: float = 0.30,
+        delay_seconds: float = 0.35,
+        dataset: str | None = None,
     ) -> CollectionResult:
         match_ids = self.riot_api.get_match_ids(
             puuid=puuid,
@@ -50,13 +60,38 @@ class MatchCollector:
         stored = 0
         skipped = 0
         failed = 0
+        dataset_attached = 0
 
         with SessionLocal() as database:
-            repository = MatchRepository(database)
+            match_repository = MatchRepository(
+                database
+            )
 
-            for index, match_id in enumerate(match_ids, start=1):
-                if repository.exists(match_id):
+            dataset_repository = (
+                MatchDatasetRepository(database)
+            )
+
+            for index, match_id in enumerate(
+                match_ids,
+                start=1,
+            ):
+                existing = (
+                    match_repository.get_by_match_id(
+                        match_id
+                    )
+                )
+
+                if existing is not None:
                     skipped += 1
+
+                    if dataset:
+                        dataset_repository.attach(
+                            match_db_id=existing.id,
+                            dataset=dataset,
+                            commit=True,
+                        )
+                        dataset_attached += 1
+
                     print(
                         f"[{index}/{len(match_ids)}] "
                         f"{match_id}: ya existe"
@@ -64,13 +99,30 @@ class MatchCollector:
                     continue
 
                 try:
-                    match_data = self.riot_api.get_match(match_id)
+                    match_data = (
+                        self.riot_api.get_match(
+                            match_id
+                        )
+                    )
                     downloaded += 1
 
-                    repository.save_match(
-                        match_data=match_data,
-                        region=self.riot_api.platform_region,
+                    match = (
+                        match_repository.save_match(
+                            match_data=match_data,
+                            region=(
+                                self.riot_api
+                                .platform_region
+                            ),
+                        )
                     )
+
+                    if dataset:
+                        dataset_repository.attach(
+                            match_db_id=match.id,
+                            dataset=dataset,
+                            commit=True,
+                        )
+                        dataset_attached += 1
 
                     stored += 1
 
@@ -86,7 +138,8 @@ class MatchCollector:
                     print(
                         f"[{index}/{len(match_ids)}] "
                         f"{match_id}: ERROR "
-                        f"{type(error).__name__}: {error}"
+                        f"{type(error).__name__}: "
+                        f"{error}"
                     )
 
                 time.sleep(delay_seconds)
@@ -97,4 +150,5 @@ class MatchCollector:
             stored=stored,
             skipped=skipped,
             failed=failed,
+            dataset_attached=dataset_attached,
         )
