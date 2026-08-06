@@ -25,10 +25,16 @@ class DraftEngine:
         enemies = champion_select.get("enemies", [])
         allies = champion_select.get("allies", [])
 
-        normalized_role = normalize_role(
-            champion_select.get("assignedPosition")
+        assigned_position = champion_select.get(
+            "assignedPosition"
         )
 
+        normalized_role = normalize_role(
+            assigned_position
+        )
+
+        # Segunda protección:
+        # el motor vuelve a filtrar aunque main.py ya lo haya hecho.
         role_candidates = filter_champions_by_role(
             champions=candidates,
             role=normalized_role,
@@ -49,24 +55,11 @@ class DraftEngine:
         enemy_names_by_id = {
             int(player["championId"]): (
                 player.get("championName")
-                or player.get("name")
                 or f"ID {player['championId']}"
             )
             for player in enemies
             if player.get("championId")
         }
-
-        ally_names = [
-            str(
-                player.get("championName")
-                or player.get("name")
-            )
-            for player in allies
-            if (
-                player.get("championName")
-                or player.get("name")
-            )
-        ]
 
         banned_ids = [
             int(ban["championId"])
@@ -90,7 +83,6 @@ class DraftEngine:
                 "queue": "420",
                 "rank": "emerald_plus",
                 "enemyNamesById": enemy_names_by_id,
-                "allyNames": ally_names,
             },
         )
 
@@ -112,7 +104,6 @@ class DraftEngine:
                 role_candidates
             ),
             "knownAllies": ally_ids,
-            "knownAllyNames": ally_names,
             "knownEnemies": enemy_ids,
             "bannedChampionIds": banned_ids,
             "metaContext": context.metadata,
