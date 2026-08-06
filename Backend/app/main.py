@@ -1,4 +1,5 @@
 ﻿from fastapi import FastAPI, HTTPException
+from app.data.role_champions import filter_champions_by_role
 from requests import RequestException
 
 from app.engine.champion_select_engine import ChampionSelectEngine
@@ -170,9 +171,19 @@ def draft_recommendations() -> dict:
 
         candidates = data_dragon.get_all_champions()
 
+        candidates = filter_champions_by_role(
+            champions=candidates,
+            role=champion_select_data.get("assignedPosition"),
+        )
+
+        owned_champion_ids = (
+            league_client.get_owned_champion_ids()
+        )
+
         draft_result = draft_engine.recommend(
             champion_select=champion_select_data,
             candidates=candidates,
+            owned_champion_ids=owned_champion_ids,
             limit=5,
         )
 
@@ -265,3 +276,5 @@ def owned_champions() -> dict:
             status_code=500,
             detail=str(error),
         ) from error
+
+
