@@ -6,6 +6,7 @@ from app.engine.champion_select_engine import ChampionSelectEngine
 from app.engine.draft_engine import DraftEngine
 from app.engine.plugins.blind_pick.blind_pick_plugin import BlindPickPlugin
 from app.engine.plugins.composition.composition_plugin import CompositionPlugin
+from app.engine.plugins.comfort.comfort_plugin import ComfortPlugin
 from app.engine.plugins.matchup.matchup_plugin import MatchupPlugin
 from app.engine.plugins.meta.meta_plugin import MetaPlugin
 from app.engine.scoring_engine import ScoringEngine
@@ -34,6 +35,7 @@ scoring_engine = ScoringEngine(
         MatchupPlugin(),
         BlindPickPlugin(),
         CompositionPlugin(),
+        ComfortPlugin(),
     ]
 )
 
@@ -278,6 +280,7 @@ def owned_champions() -> dict:
             status_code=500,
             detail=str(error),
         ) from error
+
 
 
 
